@@ -1,0 +1,91 @@
+name: ttr
+
+# Startup order is enforced by conditions, not by sleeps: the API waits for a
+# healthy database and for migrations to exit successfully.
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-app_local_password}
+      POSTGRES_DB: ${POSTGRES_DB:-app}
+      # Checksums catch silent corruption; cheap enough to always have on.
+      POSTGRES_INITDB_ARGS: "--data-checksums"
+    ports:
+      # Exposed on loopback only, for psql and local tooling.
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-app} -d ${POSTGRES_DB:-app} -q"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 1g
+
+  # Runs once per `up` and exits. The API depends on it completing, so the
+  # schema is always current before any request is served.
+  migrate:
+    image: migrate/migrate:v4.18.1
+    restart: on-failure
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./migrations:/migrations:ro
+    command:
+      - "-path=/migrations"
+      - "-database=postgres://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:-app_local_password}@postgres:5432/${POSTGRES_DB:-app}?sslmode=disable"
+      - "up"
+
+  api:
+    build:
+      context: .
+      args:
+        VERSION: ${VERSION:-dev}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      LOG_FORMAT: ${LOG_FORMAT:-json}
+      GRPC_ADDR: ":50051"
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: ${POSTGRES_USER:-app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-app_local_password}
+      POSTGRES_DB: ${POSTGRES_DB:-app}
+      POSTGRES_SSLMODE: ${POSTGRES_SSLMODE:-disable}
+      POSTGRES_MAX_CONNS: ${POSTGRES_MAX_CONNS:-10}
+    ports:
+      - "${GRPC_PORT:-50051}:50051"
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/grpc-health-probe", "-addr=:50051"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    # Hardening: the container needs nothing but its own binary and a socket.
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 256m
+
+volumes:
+  postgres-data:
