@@ -1,0 +1,82 @@
+syntax = "proto3";
+
+package user.v1;
+
+import "google/protobuf/field_mask.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/ashur/ttr/pkg/pb/user/v1;userv1";
+
+// UserService manages user records stored in PostgreSQL.
+service UserService {
+  // CreateUser persists a new user. Fails with ALREADY_EXISTS if the email is taken.
+  rpc CreateUser(CreateUserRequest) returns (CreateUserResponse);
+
+  // GetUser returns a single user by id.
+  rpc GetUser(GetUserRequest) returns (GetUserResponse);
+
+  // ListUsers returns a page of users, newest first, using an opaque keyset cursor.
+  rpc ListUsers(ListUsersRequest) returns (ListUsersResponse);
+
+  // UpdateUser applies a partial update described by update_mask.
+  rpc UpdateUser(UpdateUserRequest) returns (UpdateUserResponse);
+
+  // DeleteUser removes a user by id. Idempotent: fails with NOT_FOUND only if never existed.
+  rpc DeleteUser(DeleteUserRequest) returns (DeleteUserResponse);
+}
+
+message User {
+  string id = 1;
+  string email = 2;
+  string full_name = 3;
+  google.protobuf.Timestamp created_at = 4;
+  google.protobuf.Timestamp updated_at = 5;
+}
+
+message CreateUserRequest {
+  string email = 1;
+  string full_name = 2;
+}
+
+message CreateUserResponse {
+  User user = 1;
+}
+
+message GetUserRequest {
+  string id = 1;
+}
+
+message GetUserResponse {
+  User user = 1;
+}
+
+message ListUsersRequest {
+  // Max users to return. Defaults to 50, capped at 200.
+  int32 page_size = 1;
+  // Cursor returned by a previous call as next_page_token.
+  string page_token = 2;
+}
+
+message ListUsersResponse {
+  repeated User users = 1;
+  // Empty when the last page has been reached.
+  string next_page_token = 2;
+}
+
+message UpdateUserRequest {
+  string id = 1;
+  string email = 2;
+  string full_name = 3;
+  // Paths to update: "email", "full_name". Empty mask updates every provided field.
+  google.protobuf.FieldMask update_mask = 4;
+}
+
+message UpdateUserResponse {
+  User user = 1;
+}
+
+message DeleteUserRequest {
+  string id = 1;
+}
+
+message DeleteUserResponse {}
